@@ -27,6 +27,11 @@ IDE_Morph.prototype.googleDriveMenu = function () {
     } else {
         menu.addItem('Accedi con Google...', 'connectGoogleDrive');
     }
+    menu.addLine();
+    menu.addItem('Norme sulla privacy',
+        () => window.open('privacy.html', '_blank', 'noopener'));
+    menu.addItem('Termini di servizio',
+        () => window.open('terms.html', '_blank', 'noopener'));
     if (this.world().currentKey === 16) {
         menu.addLine();
         [

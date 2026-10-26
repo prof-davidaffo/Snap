@@ -15,6 +15,12 @@ e importare come XML. L'API JavaScript per incorporare l'editor rimane disponibi
    (se consentito dal tuo Google Workspace) oppure esterno. In modalità di test,
    aggiungi gli account che devono provare l'app agli utenti di test.
 4. Configura il permesso `https://www.googleapis.com/auth/drive.file`.
+   Nella sezione Branding usa questi URL pubblici, dopo aver pubblicato i file:
+
+   - Home page: `https://prof-davidaffo.github.io/Snap/about.html`
+   - Privacy: `https://prof-davidaffo.github.io/Snap/privacy.html`
+   - Termini: `https://prof-davidaffo.github.io/Snap/terms.html`
+
 5. Crea un client OAuth di tipo **Applicazione web**. Aggiungi alle origini
    JavaScript autorizzate l'origine HTTPS dell'editor, senza percorsi.
    Per esempio: `https://prof-davidaffo.github.io`, non `/Snap/snap.html`.

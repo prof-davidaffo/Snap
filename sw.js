@@ -9,11 +9,15 @@ if (self.location.hostname === 'localhost' ||
 }
 var snapVersion = '12.3.6',
     cachePrefix = `snap-pwa:${self.registration.scope}:`,
-    cacheName = `${cachePrefix}${snapVersion}-google-drive-2`,
+    cacheName = `${cachePrefix}${snapVersion}-google-drive-privacy-1`,
     filesToCache = [
         'index.html',
         'snap.html',
         'manifest.json',
+        'about.html',
+        'privacy.html',
+        'terms.html',
+        'info.css',
 
         // program
         'src/morphic.js',

@@ -44,6 +44,15 @@ Per attivare Google Drive:
 Il sito Pages e l'app Google sono due pubblicazioni distinte. Pubblicare il sito
 non attiva automaticamente l'accesso Google.
 
+Per i campi Branding di Google, dopo la pubblicazione delle pagine:
+
+- Home page: `https://prof-davidaffo.github.io/Snap/about.html`
+- Privacy: `https://prof-davidaffo.github.io/Snap/privacy.html`
+- Termini di servizio: `https://prof-davidaffo.github.io/Snap/terms.html`
+
+Le pagine sono accessibili senza login e collegate anche dai menu dell'editor.
+Il tracciamento Matomo ereditato dal progetto originale è stato rimosso.
+
 ## Controllo dopo la pubblicazione
 
 - Apri il sito e verifica editor, traduzione italiana, esempi e import/export.

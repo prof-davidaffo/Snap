@@ -4420,6 +4420,12 @@ IDE_Morph.prototype.snapMenu = function () {
 
     menu = new MenuMorph(this);
     menu.addItem('About...', 'aboutSnap');
+    menu.addItem('Informazioni su Snap Scuola',
+        () => window.open('about.html', '_blank', 'noopener'));
+    menu.addItem('Norme sulla privacy',
+        () => window.open('privacy.html', '_blank', 'noopener'));
+    menu.addItem('Termini di servizio',
+        () => window.open('terms.html', '_blank', 'noopener'));
     menu.addLine();
     menu.addItem(
         'Reference manual',

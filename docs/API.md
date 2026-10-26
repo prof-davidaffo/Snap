@@ -140,7 +140,7 @@ You can configure the looks and behavior of the IDE by passing it a configuratio
 |noSprites:	|bool	|hide/show the stage, corral, sprite editor|
 |noPalette:	|bool	|hide/show the palette including the categories|
 |noImports:	|bool	|disable/allow importing files via drag&drop, hides the project menu button|
-|noCloud:	|bool	|disable/enable functionalities to access the Snap! cloud|
+|noCloud:	|bool	|disable/enable Google Drive storage in this fork|
 |noOwnBlocks:	|bool	|hide/show "make a block" and "make a category" buttons|
 |noRingify:	|bool	|disable/enable "ringify" / "unringify" in context menus|
 |noUserSettings:	|bool	|disable/enable persistent user preferences|

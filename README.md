@@ -11,6 +11,16 @@ inspired by Scratch
 written by Jens Mönig and Brian Harvey
 jens@moenig.org, bh@cs.berkeley.edu
 
+## This fork
+
+This fork preserves local project import/export and backups, fixes long presses
+in editable fields on tablets, and replaces Snap!Cloud with optional Google
+Drive storage. Set the public OAuth client ID in `config.js` following
+[the Google Drive setup guide](docs/GoogleDrive.md). No application backend is required.
+
+GitHub Pages can publish `master` → `/(root)` directly, with no custom build
+workflow. See [deployment instructions](docs/GitHubPages.md).
+
 ## Snap<em>!</em> Community
 
 This repository contains the source code for Snap<em>!</em> IDE. If you have

@@ -11536,10 +11536,19 @@ HandMorph.prototype.processTouchStart = function (event) {
         ).divideBy(ZOOM);
         this.touchHoldTimeout = setInterval( // simulate mouseRightClick
             () => {
+                clearInterval(this.touchHoldTimeout);
+                // Let a held touch edit text instead of opening a menu.
+                // Include the input's padding and the editing cursor.
+                if (this.morphAtPointer().allParents().some(morph =>
+                        morph.isEditable ||
+                        (this.world.cursor &&
+                            morph === this.world.cursor.target.parent)
+                )) {
+                    return;
+                }
                 this.processMouseDown({button: 2});
                 this.processMouseUp({button: 2});
                 event.preventDefault();
-                clearInterval(this.touchHoldTimeout);
             },
             400
         );

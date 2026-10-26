@@ -29,7 +29,7 @@
 
     prerequisites:
     --------------
-    needs blocks.js, threads.js, objects.js, cloud.jus and morphic.js
+    needs blocks.js, threads.js, objects.js, storage.js and morphic.js
 
 
     toc
@@ -81,13 +81,13 @@ BlockRemovalDialogMorph,TableMorph, isSnapObject, isRetinaEnabled, SliderMorph,
 disableRetinaSupport, enableRetinaSupport, isRetinaSupported, MediaRecorder,
 Animation, BoxMorph, BlockDialogMorph, RingMorph, Project, ZERO, BLACK, CLEAR,
 BlockVisibilityDialogMorph, ThreadManager, isString, SnapExtensions, snapEquals,
-HatBlockMorph, ZOOM*/
+HatBlockMorph, ZOOM, GoogleDriveStorage*/
 
 /*jshint esversion: 11*/
 
 // Global stuff ////////////////////////////////////////////////////////
 
-modules.gui = '2026-October-23';
+modules.gui = '2026-October-26';
 
 // Declarations
 
@@ -304,7 +304,13 @@ IDE_Morph.prototype.init = function (config) {
     MorphicPreferences.globalFontFamily = 'Helvetica, Arial';
 
     // additional properties:
-    this.cloud = new Cloud();
+    this.cloud = new Cloud(); // local compatibility; no Snap!Cloud requests
+    this.drive = new GoogleDriveStorage(window.SNAP_CONFIG?.googleClientId);
+    this.driveFile = null;
+    this.storageRevision = 0;
+    this.drive.onChange = () => {
+        if (this.controlBar) { this.controlBar.cloudButton.refresh(); }
+    };
     this.cloudMsg = null;
     this.source = null;
     this.serializer = new SnapSerializer();
@@ -413,46 +419,11 @@ IDE_Morph.prototype.openIn = function (world) {
         }
     };
 
-    function initUser(username) {
-        sessionStorage.username = username;
-        myself.controlBar.cloudButton.refresh();
-        if (username) {
-            myself.source = 'cloud';
-            if (!myself.cloud.verified) {
-                new DialogBoxMorph().inform(
-                    'Unverified account',
-                    'Your account is still unverified.\n' +
-                    'Please use the verification link that\n' +
-                    'was sent to your email address when you\n' +
-                    'signed up.\n\n' +
-                    'If you cannot find that email, please\n' +
-                    'check your spam folder. If you still\n' +
-                    'cannot find it, please use the "Resend\n' +
-                    'Verification Email..." option in the cloud\n' +
-                    'menu.',
-                    world,
-                    myself.cloudIcon(null, new Color(0, 180, 0))
-                );
-            }
-        }
-    }
-
     this.buildPanes();
     world.add(this);
     this.applySavedMagnification();
     // this.applySavedStageScale(); // commented out for now
     world.userMenu = this.userMenu;
-
-    // override SnapCloud's user message with Morphic
-    this.cloud.message = (string) => {
-        var m = new MenuMorph(null, string),
-            intervalHandle;
-        m.popUpCenteredInWorld(world);
-        intervalHandle = setInterval(() => {
-            m.destroy();
-            clearInterval(intervalHandle);
-        }, 2000);
-    };
 
     // prevent non-DialogBoxMorphs from being dropped
     // onto the World in user-mode
@@ -472,6 +443,7 @@ IDE_Morph.prototype.openIn = function (world) {
     function applyFlags(dict) {
         if (dict.noCloud) {
             myself.cloud.disable();
+            myself.config.noCloud = true;
         }
         if (dict.embedMode) {
             myself.setEmbedMode();
@@ -718,105 +690,17 @@ IDE_Morph.prototype.openIn = function (world) {
                     }
                 );
             }
-        } else if (location.hash.substr(0, 9) === '#present:') {
-            this.shield = new Morph();
-            this.shield.color = this.color;
-            this.shield.setExtent(this.parent.extent());
-            this.parent.add(this.shield);
-            myself.showMessage('Fetching project\nfrom the cloud...');
-
-            // make sure to lowercase the username
-            dict = myself.cloud.parseDict(location.hash.substr(9));
-            dict.Username = dict.Username.toLowerCase();
-
-            myself.cloud.getPublicProject(
-                dict.ProjectName,
-                dict.Username,
-                projectData => {
-                    var msg;
-                    myself.nextSteps([
-                        () => msg = myself.showMessage('Opening project...'),
-                        () => {
-                            if (projectData.indexOf('<snapdata') === 0) {
-                                myself.rawOpenCloudDataString(projectData);
-                            } else if (
-                                projectData.indexOf('<project') === 0
-                            ) {
-                                myself.rawOpenProjectString(projectData);
-                            }
-                            myself.hasChangedMedia = true;
-                        },
-                        () => {
-                            myself.shield.destroy();
-                            myself.shield = null;
-                            msg.destroy();
-                            applyFlags(dict);
-                        }
-                    ]);
-                },
-                this.cloudError()
-            );
-        } else if (location.hash.substr(0, 7) === '#cloud:') {
-            this.shield = new Morph();
-            this.shield.alpha = 0;
-            this.shield.setExtent(this.parent.extent());
-            this.parent.add(this.shield);
-            myself.showMessage('Fetching project\nfrom the cloud...');
-
-            // make sure to lowercase the username
-            dict = myself.cloud.parseDict(location.hash.substr(7));
-
-            myself.cloud.getPublicProject(
-                dict.ProjectName,
-                dict.Username,
-                projectData => {
-                    var msg;
-                    myself.nextSteps([
-                        () => msg = myself.showMessage('Opening project...'),
-                        () => {
-                            if (projectData.indexOf('<snapdata') === 0) {
-                                myself.rawOpenCloudDataString(projectData);
-                            } else if (
-                                projectData.indexOf('<project') === 0
-                            ) {
-                                myself.rawOpenProjectString(projectData);
-                            }
-                            myself.hasChangedMedia = true;
-                        },
-                        () => {
-                            myself.shield.destroy();
-                            myself.shield = null;
-                            msg.destroy();
-                            myself.toggleAppMode(false);
-                        }
-                    ]);
-                },
-                this.cloudError()
-            );
-        } else if (location.hash.substr(0, 4) === '#dl:') {
-            myself.showMessage('Fetching project\nfrom the cloud...');
-
-            // make sure to lowercase the username
-            dict = myself.cloud.parseDict(location.hash.substr(4));
-            dict.Username = dict.Username.toLowerCase();
-
-            myself.cloud.getPublicProject(
-                dict.ProjectName,
-                dict.Username,
-                projectData => {
-                	myself.saveXMLAs(projectData, dict.ProjectName);
-                 	myself.showMessage(
-                  	   'Saved project\n' + dict.ProjectName,
-                      	2
-                 	);
-                },
-                this.cloudError()
-            );
+        } else if (['#present:', '#cloud:', '#dl:'].some(
+            prefix => location.hash.startsWith(prefix)
+        )) {
+            this.inform('Snap!Cloud',
+                'Questa versione usa Google Drive. Per recuperare un progetto ' +
+                'Snap!Cloud, esportalo dal sito originale e importa il file XML.');
         } else if (location.hash.substr(0, 6) === '#lang:') {
             dict = myself.cloud.parseDict(location.hash.substr(6));
             applyFlags(dict);
         } else if (location.hash.substr(0, 7) === '#signup') {
-            this.createCloudAccount();
+            this.showMessage('Usa il menu Google Drive per accedere con Google.', 4);
         }
         this.loadNewProject = false;
     }
@@ -848,17 +732,6 @@ IDE_Morph.prototype.openIn = function (world) {
 
     if (location.protocol === 'file:') {
         Process.prototype.enableJS = true;
-    } else if (!this.config.noCloud) {
-        // honor config.noCloud here at startup: applyConfigurations() below
-        // does disable the cloud, but only after these requests would
-        // already have been sent
-        if (!sessionStorage.username) {
-            // check whether login should persist across browser sessions
-            this.cloud.initSession(initUser);
-        } else {
-            // login only persistent during a single browser session
-            this.cloud.checkCredentials(initUser);
-        }
     }
 
     world.keyboardFocus = this.stage;
@@ -1521,7 +1394,7 @@ IDE_Morph.prototype.createControlBar = function () {
             new SymbolMorph('cloudOutline', 11),
             new SymbolMorph('cloud', 11)
         ],
-        () => !isNil(this.cloud.username) // query
+        () => this.drive.connected // query
     );
 
     button.hasNeutralBackground = true;
@@ -1604,7 +1477,7 @@ IDE_Morph.prototype.createControlBar = function () {
             projectButton.hide();
         }
 
-        if (myself.cloud.disabled || myself.config.hideCloudMenu) {
+        if (myself.config.noCloud || myself.config.hideCloudMenu) {
             cloudButton.hide();
             projectButton.setRight(settingsButton.left() - padding);
         } else {
@@ -4011,6 +3884,7 @@ IDE_Morph.prototype.hasUnsavedEdits = function () {
 };
 
 IDE_Morph.prototype.recordUnsavedChanges = function (spriteName, details) {
+    this.storageRevision += 1;
     this.scene.hasUnsavedEdits = true;
     this.updateChanges(spriteName, details);
 };
@@ -4587,179 +4461,7 @@ IDE_Morph.prototype.snapMenu = function () {
 };
 
 IDE_Morph.prototype.cloudMenu = function () {
-    var menu,
-        world = this.world(),
-        pos = this.controlBar.cloudButton.bottomLeft(),
-        shiftClicked = (world.currentKey === 16);
-
-    if (location.protocol === 'file:' && !shiftClicked) {
-        this.showMessage('cloud unavailable without a web server.');
-        return;
-    }
-
-    menu = new MenuMorph(this);
-    if (shiftClicked) {
-        menu.addItem(
-            'url...',
-            'setCloudURL',
-            null,
-            new Color(100, 0, 0)
-        );
-        menu.addLine();
-    }
-    if (!this.cloud.username) {
-        menu.addItem(
-            'Login...',
-            'initializeCloud'
-        );
-        menu.addItem(
-            'Signup...',
-            'createCloudAccount'
-        );
-        menu.addItem(
-            'Reset Password...',
-            'resetCloudPassword'
-        );
-        menu.addItem(
-            'Resend Verification Email...',
-            'resendVerification'
-        );
-    } else {
-        menu.addItem(
-            localize('Logout') + ' ' + this.cloud.username,
-            'logout'
-        );
-        menu.addItem(
-            'Change Password...',
-            'changeCloudPassword'
-        );
-    }
-    if (this.hasCloudProject()) {
-        menu.addLine();
-        menu.addItem(
-            'Open in Community Site',
-            () => {
-                var dict = this.urlParameters();
-                window.open(
-                    this.cloud.showProjectPath(
-                        dict.Username, dict.ProjectName
-                    ),
-                    '_blank'
-                );
-            }
-        );
-    }
-    if (shiftClicked) {
-        menu.addLine();
-        menu.addItem(
-            'export project media only...',
-            () => {
-                var pn = this.getProjectName();
-                if (pn) {
-                    this.exportProjectMedia(pn);
-                } else {
-                    this.prompt(
-                        'Export Project As...',
-                        name => this.exportProjectMedia(name),
-                        null,
-                        'exportProject'
-                    );
-                }
-            },
-            null,
-            this.hasChangedMedia ? new Color(100, 0, 0) : new Color(0, 100, 0)
-        );
-        menu.addItem(
-            'export project without media...',
-            () => {
-                var pn = this.getProjectName();
-                if (pn) {
-                    this.exportProjectNoMedia(pn);
-                } else {
-                    this.prompt(
-                        'Export Project As...',
-                        name => this.exportProjectNoMedia(name),
-                        null,
-                        'exportProject'
-                    );
-                }
-            },
-            null,
-            new Color(100, 0, 0)
-        );
-        menu.addItem(
-            'export project as cloud data...',
-            () => {
-                var pn = this.getProjectName();
-                if (pn) {
-                    this.exportProjectAsCloudData(pn);
-                } else {
-                    this.prompt(
-                        'Export Project As...',
-                        name => this.exportProjectAsCloudData(name),
-                        null,
-                        'exportProject'
-                    );
-                }
-            },
-            null,
-            new Color(100, 0, 0)
-        );
-        menu.addLine();
-        menu.addItem(
-            'open shared project from cloud...',
-            () => {
-                this.prompt(
-                    'Author name…',
-                    usr => {
-                        this.prompt(
-                            'Project name...',
-                            prj => {
-                                this.showMessage(
-                                    'Fetching project\nfrom the cloud...'
-                                );
-                                this.cloud.getPublicProject(
-                                    prj,
-                                    usr.toLowerCase(),
-                                    projectData => {
-                                        var msg;
-                                        if (
-                                            !Process.prototype.isCatchingErrors
-                                        ) {
-                                            window.open(
-                                                'data:text/xml,' + projectData
-                                            );
-                                        }
-                                    this.nextSteps([
-                                        () => {
-                                            msg = this.showMessage(
-                                                'Opening project...'
-                                            );
-                                        },
-                                        () => {
-                                            this.rawOpenCloudDataString(
-                                                projectData
-                                            );
-                                            msg.destroy();
-                                        },
-                                    ]);
-                                },
-                                this.cloudError()
-                            );
-                        },
-                        null,
-                        'project'
-                    );
-                },
-                null,
-                'project'
-                );
-            },
-            null,
-            new Color(100, 0, 0)
-        );
-    }
-    menu.popup(world, pos);
+    this.googleDriveMenu();
 };
 
 IDE_Morph.prototype.settingsMenu = function () {
@@ -5211,6 +4913,10 @@ IDE_Morph.prototype.projectMenu = function () {
             menu.addPair('Open...', 'openProjectsBrowser', '^O');
             menu.addPair('Save', "save", '^S');
             menu.addItem('Save As...', 'saveProjectsBrowser');
+            if (!this.config.noCloud) {
+                menu.addItem('Apri da Google Drive...', 'openGoogleDriveBrowser');
+                menu.addItem('Salva su Google Drive...', 'saveGoogleDriveProject');
+            }
             if (backup) {
                 menu.addItem(
                     'Restore unsaved project',
@@ -6150,7 +5856,7 @@ IDE_Morph.prototype.newProject = function () {
     var project = new Project();
 
     project.addDefaultScene();
-    this.source = this.cloud.username ? 'cloud' : null;
+    this.source = null;
     if (location.hash.substr(0, 6) !== '#lang:') {
         location.hash = '';
     }
@@ -6355,13 +6061,15 @@ IDE_Morph.prototype.save = function () {
         this.source = null;
     }
 
+    if (this.source === 'drive' && !this.config.noCloud) {
+        this.saveGoogleDriveProject(pn);
+        return;
+    }
     if (this.cloud.disabled) {this.source = 'disk'; }
 
     if (pn) {
         if (this.source === 'disk') {
             this.exportProject(pn);
-        } else if (this.source === 'cloud') {
-            this.saveProjectToCloud(pn);
         } else {
             this.saveProjectsBrowser();
         }
@@ -7020,6 +6728,7 @@ IDE_Morph.prototype.rawOpenProjectString = function (str, noPrims, keepRoles) {
             );
         } catch (err) {
             this.showMessage('Load failed: ' + err);
+            return false;
         }
     } else {
         this.openProject(
@@ -7028,6 +6737,7 @@ IDE_Morph.prototype.rawOpenProjectString = function (str, noPrims, keepRoles) {
     }
     this.autoLoadExtensions();
     this.stopFastTracking();
+    return true;
 };
 
 IDE_Morph.prototype.openCloudDataString = function (str) {
@@ -7403,6 +7113,7 @@ IDE_Morph.prototype.openProjectName = function (name) {
 IDE_Morph.prototype.openProject = function (project, purgeCustomizedPrims) {
     var scn = project.currentScene || project.scenes.at(1),
         tutorial;
+    if (!this.isAddingScenes) { this.driveFile = null; }
     if (this.isAddingScenes) {
         project.scenes.itemsArray().forEach(scene => {
             scene.name = this.newSceneName(scene.name, scene);
@@ -9534,285 +9245,6 @@ IDE_Morph.prototype.userCustomizePalette = function (callback = nop) {
 
 // IDE_Morph cloud interface
 
-IDE_Morph.prototype.initializeCloud = function () {
-    var world = this.world();
-    new DialogBoxMorph(
-        null,
-        user => this.cloud.login(
-            user.username.toLowerCase(),
-            user.password,
-            user.choice,
-            (username, role, response) => {
-                sessionStorage.username = username;
-                this.controlBar.cloudButton.refresh();
-                this.source = 'cloud';
-                if (!isNil(response.days_left)) {
-                    var duration = response.days_left + ' day' +
-                        (response.days_left > 1 ? 's' : '');
-                    new DialogBoxMorph().inform(
-                        'Unverified account: ' + duration + ' left' +
-                        'You are now logged in, and your account\n' +
-                        'is enabled for ' + duration + '.\n' +
-                        'Please use the verification link that\n' +
-                        'was sent to your email address when you\n' +
-                        'signed up.\n\n' +
-                        'If you cannot find that email, please\n' +
-                        'check your spam folder. If you still\n' +
-                        'cannot find it, please use the "Resend\n' +
-                        'Verification Email..." option in the cloud\n' +
-                        'menu.\n\n' +
-                        'You have ' + duration + ' left.',
-                        world,
-                        this.cloudIcon(null, new Color(0, 180, 0))
-                    );
-                } else if (response.title) {
-                    new DialogBoxMorph().inform(
-                        response.title,
-                        response.message,
-                        world,
-                        this.cloudIcon(null, new Color(0, 180, 0))
-                    );
-                } else {
-                    this.showMessage(response.message, 2);
-                }
-            },
-            this.cloudError()
-        )
-    ).withKey('cloudlogin').promptCredentials(
-        'Sign in',
-        'login',
-        null,
-        null,
-        null,
-        null,
-        'stay signed in on this computer\nuntil logging out',
-        world,
-        this.cloudIcon(),
-        this.cloudMsg
-    );
-};
-
-IDE_Morph.prototype.createCloudAccount = function () {
-    var world = this.world();
-
-    new DialogBoxMorph(
-        null,
-        user => this.cloud.signup(
-            user.username,
-            user.password,
-            user.passwordRepeat,
-            user.email,
-            (txt, title) => new DialogBoxMorph().inform(
-                title,
-                txt + '.\n\nYou can now log in.',
-                world,
-                this.cloudIcon(null, new Color(0, 180, 0))
-            ),
-            this.cloudError()
-        )
-    ).withKey('cloudsignup').promptCredentials(
-        'Sign up',
-        'signup',
-        'https://snap.berkeley.edu/tos.html',
-        'Terms of Service...',
-        'https://snap.berkeley.edu/privacy.html',
-        'Privacy...',
-        'I have read and agree\nto the Terms of Service',
-        world,
-        this.cloudIcon(),
-        this.cloudMsg
-    );
-};
-
-IDE_Morph.prototype.resetCloudPassword = function () {
-    var world = this.world();
-
-    new DialogBoxMorph(
-        null,
-        user => this.cloud.resetPassword(
-            user.username,
-            (txt, title) => new DialogBoxMorph().inform(
-                title,
-                txt +
-                    '\n\nAn e-mail with a link to\n' +
-                    'reset your password\n' +
-                    'has been sent to the address provided',
-                world,
-                this.cloudIcon(null, new Color(0, 180, 0))
-            ),
-            this.cloudError()
-        )
-    ).withKey('cloudresetpassword').promptCredentials(
-        'Reset password',
-        'resetPassword',
-        null,
-        null,
-        null,
-        null,
-        null,
-        world,
-        this.cloudIcon(),
-        this.cloudMsg
-    );
-};
-
-IDE_Morph.prototype.resendVerification = function () {
-    var world = this.world();
-
-    new DialogBoxMorph(
-        null,
-        user => this.cloud.resendVerification(
-            user.username,
-            (txt, title) => new DialogBoxMorph().inform(
-                title,
-                txt,
-                world,
-                this.cloudIcon(null, new Color(0, 180, 0))
-            ),
-            this.cloudError()
-        )
-    ).withKey('cloudresendverification').promptCredentials(
-        'Resend verification email',
-        'resendVerification',
-        null,
-        null,
-        null,
-        null,
-        null,
-        world,
-        this.cloudIcon(),
-        this.cloudMsg
-    );
-};
-
-IDE_Morph.prototype.changeCloudPassword = function () {
-    var world = this.world();
-
-    new DialogBoxMorph(
-        null,
-        user => this.cloud.changePassword(
-            user.oldpassword,
-            user.password,
-            user.passwordRepeat,
-            () => this.showMessage('password has been changed.', 2),
-            this.cloudError()
-        )
-    ).withKey('cloudpassword').promptCredentials(
-        'Change Password',
-        'changePassword',
-        null,
-        null,
-        null,
-        null,
-        null,
-        world,
-        this.cloudIcon(),
-        this.cloudMsg
-    );
-};
-
-IDE_Morph.prototype.logout = function () {
-    this.cloud.logout(
-        () => {
-            delete(sessionStorage.username);
-            this.controlBar.cloudButton.refresh();
-            this.showMessage('disconnected.', 2);
-        },
-        () => {
-            delete(sessionStorage.username);
-            this.controlBar.cloudButton.refresh();
-            this.showMessage('disconnected.', 2);
-        }
-    );
-};
-
-IDE_Morph.prototype.buildProjectRequest = function () {
-    var proj = new Project(this.scenes, this.scene),
-        body,
-        xml;
-
-    this.scene.captureGlobalSettings();
-    this.serializer.isCollectingMedia = true;
-    xml = this.serializer.serialize(proj);
-    body = {
-        notes: proj.notes,
-        xml: xml,
-        /*
-        media: this.hasChangedMedia ? // incremental media upload, disabled
-            this.serializer.mediaXML(proj.name) : null,
-        */
-        media: this.serializer.mediaXML(proj.name),
-        thumbnail: proj.thumbnail.toDataURL(),
-        remixID: this.stage.remixID
-    };
-    this.serializer.isCollectingMedia = false;
-    this.serializer.flushMedia();
-    this.scene.applyGlobalSettings();
-
-    return body;
-};
-
-IDE_Morph.prototype.verifyProject = function (body) {
-    // Ensure the project is less than 10MB and serializes correctly.
-    var encodedBody = JSON.stringify(body);
-    if (encodedBody.length > Cloud.MAX_FILE_SIZE) {
-        new DialogBoxMorph().inform(
-            'Snap!Cloud - Cannot Save Project',
-            'The media inside this project exceeds 10 MB.\n' +
-                'Please reduce the size of costumes or sounds.\n',
-            this.world(),
-            this.cloudIcon(null, new Color(180, 0, 0))
-        );
-        return false;
-    }
-
-    // console.log(encodedBody.length);
-    // check if serialized data can be parsed back again
-    try {
-        this.serializer.parse(body.xml);
-    } catch (err) {
-        this.showMessage('Serialization of program data failed:\n' + err);
-        return false;
-    }
-    if (body.media !== null) {
-        try {
-            this.serializer.parse(body.media);
-        } catch (err) {
-            this.showMessage('Serialization of media failed:\n' + err);
-            return false;
-        }
-    }
-    this.serializer.isCollectingMedia = false;
-    this.serializer.flushMedia();
-
-    return encodedBody.length;
-};
-
-IDE_Morph.prototype.saveProjectToCloud = function (name) {
-    var projectBody, projectSize;
-
-    if (name) {
-        name = this.setProjectName(name);
-    }
-
-    this.showMessage('Saving project\nto the cloud...');
-    projectBody = this.buildProjectRequest();
-    projectSize = this.verifyProject(projectBody);
-    if (!projectSize) {return; } // Invalid Projects don't return anything.
-    this.showMessage(
-        'Uploading ' + Math.round(projectSize / 1024) + ' KB...'
-    );
-    this.cloud.saveProject(
-        this.getProjectName(),
-        projectBody,
-        (message) => {
-            this.recordSavedChanges();
-            this.showMessage(message, 2);
-        },
-        this.cloudError()
-    );
-};
-
 IDE_Morph.prototype.exportProjectMedia = function (name) {
     var menu, media;
     this.scene.captureGlobalSettings();
@@ -9911,64 +9343,6 @@ IDE_Morph.prototype.exportProjectAsCloudData = function (name) {
     // this.hasChangedMedia = false;
 };
 
-IDE_Morph.prototype.cloudAcknowledge = function () {
-    return (responseText, url) => {
-        nop(responseText);
-        new DialogBoxMorph().inform(
-            'Cloud Connection',
-            'Successfully connected to:\n'
-                + 'http://'
-                + url,
-            this.world(),
-            this.cloudIcon(null, new Color(0, 180, 0))
-        );
-    };
-};
-
-IDE_Morph.prototype.cloudResponse = function () {
-    return (responseText, url) => {
-        var response = responseText;
-        if (response.length > 50) {
-            response = response.substring(0, 50) + '...';
-        }
-        new DialogBoxMorph().inform(
-            'Snap!Cloud',
-            'http://'
-                + url + ':\n\n'
-                + 'responds:\n'
-                + response,
-            this.world(),
-            this.cloudIcon(null, new Color(0, 180, 0))
-        );
-    };
-};
-
-IDE_Morph.prototype.cloudError = function () {
-    return (responseText, url) => {
-        // first, try to find out an explanation for the error
-        // and notify the user about it,
-        // if none is found, show an error dialog box
-        var response = responseText,
-            // explanation = getURL('https://snap.berkeley.edu/cloudmsg.txt'),
-            explanation = null;
-        if (this.shield) {
-            this.shield.destroy();
-            this.shield = null;
-        }
-        if (explanation) {
-            this.showMessage(explanation);
-            return;
-        }
-        new DialogBoxMorph().inform(
-            'Snap!Cloud',
-            (url ? url + '\n' : '')
-                + response,
-            this.world(),
-            this.cloudIcon(null, new Color(180, 0, 0))
-        );
-    };
-};
-
 IDE_Morph.prototype.cloudIcon = function (height, color) {
     var clr = color || DialogBoxMorph.prototype.titleBarColor,
         isFlat = MorphicPreferences.isFlat,
@@ -9985,34 +9359,9 @@ IDE_Morph.prototype.cloudIcon = function (height, color) {
     return icon;
 };
 
-IDE_Morph.prototype.setCloudURL = function () {
-    new DialogBoxMorph(
-        null,
-        url => {
-            this.cloud.url = url;
-            this.cloud.checkCredentials(
-                () => this.controlBar.cloudButton.refresh(),
-                () => this.controlBar.cloudButton.refresh()
-            );
-        }
-    ).withKey('cloudURL').prompt(
-        'Cloud URL',
-        this.cloud.url,
-        this.world(),
-        null,
-        this.cloud.knownDomains
-    );
-};
-
 IDE_Morph.prototype.urlParameters = function () {
     var parameters = location.hash.slice(location.hash.indexOf(':') + 1);
     return this.cloud.parseDict(parameters);
-};
-
-IDE_Morph.prototype.hasCloudProject = function () {
-    var params = this.urlParameters();
-    return params.hasOwnProperty('Username') &&
-        params.hasOwnProperty('ProjectName');
 };
 
 // IDE_Morph HTTP data fetching
@@ -10348,7 +9697,9 @@ ProjectDialogMorph.prototype.init = function (ide, task) {
     // additional properties:
     this.ide = ide;
     this.task = task || 'open'; // String describing what do do (open, save)
-    this.source = ide.source;
+    this.source = ide.source === 'drive' && ide.drive.connected ? 'drive' :
+        task === 'save' || ide.source === 'disk' ? 'disk' :
+        ide.source === 'local' ? 'local' : 'examples';
     this.projectList = []; // [{name: , thumb: , notes:}]
 
     this.handle = null;
@@ -10361,11 +9712,6 @@ ProjectDialogMorph.prototype.init = function (ide, task) {
     this.notesText = null;
     this.notesField = null;
     this.deleteButton = null;
-    this.shareButton = null;
-    this.unshareButton = null;
-    this.publishButton = null;
-    this.unpublishButton = null;
-    this.recoverButton = null;
 
     // initialize inherited properties:
     ProjectDialogMorph.uber.init.call(
@@ -10431,8 +9777,8 @@ ProjectDialogMorph.prototype.buildContents = function () {
         this.srcBar.add(notification);
     }
 
-    if (!this.ide.cloud.disabled) {
-        this.addSourceButton('cloud', localize('Cloud'), 'cloud');
+    if (!this.ide.config.noCloud) {
+        this.addSourceButton('drive', 'Google Drive', 'cloud');
     }
 
     if (this.task === 'open' || this.task === 'add') {
@@ -10528,29 +9874,13 @@ ProjectDialogMorph.prototype.buildContents = function () {
     if (this.task === 'open') {
         this.addButton('openProject', 'Open');
         this.action = 'openProject';
-        this.recoverButton = this.addButton('recoveryDialog', 'Recover', true);
-        this.recoverButton.hide();
     } else if (this.task === 'add') {
         this.addButton('addScene', 'Add');
         this.action = 'addScene';
-        this.recoverButton = this.addButton('recoveryDialog', 'Recover', true);
-        this.recoverButton.hide();
     } else { // 'save'
         this.addButton('saveProject', 'Save');
         this.action = 'saveProject';
     }
-    this.shareButton = this.addButton('shareProject', 'Share', true);
-    this.unshareButton = this.addButton('unshareProject', 'Unshare', true);
-    this.shareButton.hide();
-    this.unshareButton.hide();
-    this.publishButton = this.addButton('publishProject', 'Publish', true);
-    this.unpublishButton = this.addButton(
-        'unpublishProject',
-        'Unpublish',
-        true
-    );
-    this.publishButton.hide();
-    this.unpublishButton.hide();
     this.deleteButton = this.addButton('deleteProject', 'Delete');
     this.addButton('cancel', 'Cancel');
 
@@ -10762,8 +10092,9 @@ ProjectDialogMorph.prototype.buildFilterField = function () {
 
 // ProjectDialogMorph ops
 
-ProjectDialogMorph.prototype.setSource = function (source) {
-    var msg, setting;
+ProjectDialogMorph.prototype.setSource = function (source, driveProjects) {
+    var setting;
+    this.driveListRequest = (this.driveListRequest || 0) + 1;
 
     this.source = source;
     this.srcBar.children.forEach(button =>
@@ -10771,23 +10102,19 @@ ProjectDialogMorph.prototype.setSource = function (source) {
     );
 
     switch (this.source) {
-    case 'cloud':
-        msg = this.ide.showMessage('Updating\nproject list...');
-        this.projectList = [];
-        this.ide.cloud.getProjectList(
-            response => {
-                // Don't show cloud projects if user has since switched panes.
-                if (this.source === 'cloud') {
-                    this.installCloudProjectList(response.projects);
-                }
-                msg.destroy();
-            },
-            (err, lbl) => {
-                msg.destroy();
-                this.ide.cloudError().call(null, err, lbl);
-            }
-        );
-        return;
+    case 'drive':
+        if (!driveProjects) {
+            this.loadGoogleDriveList();
+            return;
+        }
+        this.projectList = driveProjects.map(file => ({
+            name: file.name.replace(/\.xml$/i, ''),
+            fileId: file.id,
+            account: this.ide.drive.user.permissionId,
+            notes: file.description || '',
+            modifiedTime: file.modifiedTime
+        }));
+        break;
     case 'examples':
         this.projectList = this.getExamplesProjectList();
         break;
@@ -10858,7 +10185,18 @@ ProjectDialogMorph.prototype.setSource = function (source) {
             }
             this.edit();
         };
-    } else { // 'examples'; 'cloud' is initialized elsewhere
+    } else if (this.source === 'drive') {
+        this.listField.action = item => {
+            if (!item || typeof item !== 'object') { return; }
+            if (this.nameField) { this.nameField.setContents(item.name); }
+            if (this.task !== 'save') {
+                this.notesText.text = item.notes;
+                this.notesText.rerender();
+                this.notesField.contents.adjustBounds();
+            }
+            this.edit();
+        };
+    } else { // 'examples'
         this.listField.action = (item) => {
             var src, xml;
             if (item === undefined) {return; }
@@ -10879,15 +10217,8 @@ ProjectDialogMorph.prototype.setSource = function (source) {
         };
     }
     this.body.add(this.listField);
-    this.shareButton.hide();
-    this.unshareButton.hide();
 
-    if (this.task === 'open' || this.task === 'add') {
-        this.recoverButton.hide();
-    }
 
-    this.publishButton.hide();
-    this.unpublishButton.hide();
     if (this.source === 'local') {
         this.deleteButton.show();
     } else { // examples
@@ -10934,109 +10265,6 @@ ProjectDialogMorph.prototype.getExamplesProjectList = function () {
     return this.ide.getMediaList('Examples');
 };
 
-ProjectDialogMorph.prototype.installCloudProjectList = function (pl) {
-    this.projectList = pl[0] ? pl : [];
-    this.projectList.sort((x, y) =>
-        x.projectname.toLowerCase() < y.projectname.toLowerCase() ? -1 : 1
-    );
-
-    this.listField.destroy();
-    this.listField = new ListMorph(
-        this.projectList,
-        this.projectList.length > 0 ?
-            (element) => {return element.projectname || element; }
-                : null,
-        [ // format: display shared project names bold
-            [
-                'bold',
-                proj => proj.ispublic
-            ],
-            [
-                'italic',
-                proj => proj.ispublished
-            ]
-        ],
-        () => this.ok()
-    );
-    this.fixListFieldItemColors();
-    this.listField.fixLayout = nop;
-    this.listField.edge = InputFieldMorph.prototype.edge;
-    this.listField.fontSize = InputFieldMorph.prototype.fontSize;
-    this.listField.typeInPadding = InputFieldMorph.prototype.typeInPadding;
-    this.listField.contrast = InputFieldMorph.prototype.contrast;
-    this.listField.render = InputFieldMorph.prototype.render;
-    this.listField.drawRectBorder = InputFieldMorph.prototype.drawRectBorder;
-
-    this.listField.action = (item) => {
-        if (item === undefined) {return; }
-        if (this.nameField) {
-            this.nameField.setContents(item.projectname || '');
-        }
-        if (this.task === 'open' || this.task === 'add') {
-            this.notesText.text = item.notes || '';
-            this.notesText.rerender();
-            this.notesField.contents.adjustBounds();
-            this.preview.texture = '';
-            this.preview.rerender();
-            // we ask for the thumbnail when selecting a project
-            this.ide.cloud.getThumbnail(
-                null, // username is implicit
-                item.projectname,
-                thumbnail => {
-                    this.preview.texture = thumbnail;
-                    this.preview.cachedTexture = null;
-                    this.preview.rerender();
-                });
-            new SpeechBubbleMorph(new TextMorph(
-                localize('last changed') + '\n' + item.lastupdated,
-                null,
-                null,
-                null,
-                null,
-                'center'
-            )).popUp(
-                this.world(),
-                this.preview.rightCenter().add(new Point(2, 0))
-            );
-        }
-        if (!this.ide.config.noShare) {
-            if (item.ispublic) {
-                this.shareButton.hide();
-                this.unshareButton.show();
-                if (item.ispublished) {
-                    this.publishButton.hide();
-                    this.unpublishButton.show();
-                } else {
-                    this.publishButton.show();
-                    this.unpublishButton.hide();
-                }
-            } else {
-                this.unshareButton.hide();
-                this.shareButton.show();
-                this.publishButton.hide();
-                this.unpublishButton.hide();
-            }
-        }
-        this.buttons.fixLayout();
-        this.fixLayout();
-        this.edit();
-    };
-    this.body.add(this.listField);
-    if (this.task === 'open' || this.task === 'add') {
-        this.recoverButton.show();
-    }
-    if (!this.ide.config.noShare) {
-        this.shareButton.show();
-        this.unshareButton.hide();
-    }
-    this.deleteButton.show();
-    this.buttons.fixLayout();
-    this.fixLayout();
-    if (this.task === 'open' || this.task === 'add') {
-        this.clearDetails();
-    }
-};
-
 ProjectDialogMorph.prototype.clearDetails = function () {
     this.notesText.text = '';
     this.notesText.rerender();
@@ -11046,23 +10274,18 @@ ProjectDialogMorph.prototype.clearDetails = function () {
     this.preview.rerender();
 };
 
-ProjectDialogMorph.prototype.recoveryDialog = function () {
-    var proj = this.listField.selected;
-    if (!proj) {return; }
-    this.removeShadow();
-    this.hide();
-    new ProjectRecoveryDialogMorph(this.ide, proj.projectname, this).popUp();
-};
-
 ProjectDialogMorph.prototype.addScene = function () {
     var proj = this.listField.selected,
         src;
     if (!proj) {return; }
+    if (this.source === 'drive') {
+        this.ide.openGoogleDriveProject(proj, true);
+        this.destroy();
+        return;
+    }
     this.ide.isAddingNextScene = true;
     this.ide.source = this.source;
-    if (this.source === 'cloud') {
-        this.addCloudScene(proj);
-    } else if (this.source === 'examples') {
+    if (this.source === 'examples') {
         // Note "file" is a property of the parseResourceFile function.
         src = this.ide.getURL(this.ide.resourceURL('Examples', proj.fileName));
         this.ide.openProjectString(src);
@@ -11079,10 +10302,13 @@ ProjectDialogMorph.prototype.openProject = function () {
     var proj = this.listField.selected,
         src;
     if (!proj) {return; }
+    if (this.source === 'drive') {
+        this.ide.openGoogleDriveProject(proj);
+        this.destroy();
+        return;
+    }
     this.ide.source = this.source;
-    if (this.source === 'cloud') {
-        this.openCloudProject(proj);
-    } else if (this.source === 'examples') {
+    if (this.source === 'examples') {
         // Note "file" is a property of the parseResourceFile function.
         src = this.ide.getURL(this.ide.resourceURL('Examples', proj.fileName));
         this.ide.backup(() => this.ide.openProjectString(src));
@@ -11095,48 +10321,6 @@ ProjectDialogMorph.prototype.openProject = function () {
     }
 };
 
-ProjectDialogMorph.prototype.addCloudScene = function (project, delta) {
-    // no need to backup
-    this.ide.nextSteps([
-        () => this.ide.showMessage('Fetching project\nfrom the cloud...'),
-        () => this.rawOpenCloudProject(project, delta)
-    ]);
-};
-
-ProjectDialogMorph.prototype.openCloudProject = function (project, delta) {
-    this.ide.backup(
-        () => {
-            SpriteMorph.prototype.initBlocks(); // reset prims
-            this.ide.nextSteps([
-                () => this.ide.showMessage('Fetching project\nfrom the cloud...'),
-                () => this.rawOpenCloudProject(project, delta)
-            ]);
-        }
-    );
-};
-
-ProjectDialogMorph.prototype.rawOpenCloudProject = function (proj, delta) {
-    this.ide.cloud.getProject(
-        proj.projectname,
-        delta,
-        clouddata => {
-            this.ide.source = 'cloud';
-            this.ide.nextSteps([
-                () => this.ide.openCloudDataString(clouddata)
-            ]);
-			location.hash = '';
-            if (proj.ispublic) {
-                location.hash = '#present:Username=' +
-                    encodeURIComponent(this.ide.cloud.username) +
-                    '&ProjectName=' +
-                    encodeURIComponent(proj.projectname);
-            }
-        },
-        this.ide.cloudError()
-    );
-    this.destroy();
-};
-
 ProjectDialogMorph.prototype.saveProject = function () {
     var name = this.nameField.contents().text.text,
         notes = this.notesText.text;
@@ -11145,24 +10329,18 @@ ProjectDialogMorph.prototype.saveProject = function () {
         this.ide.setProjectNotes(notes);
     }
     if (name) {
-        if (this.source === 'cloud') {
-            if (detect(
-                    this.projectList,
-                    item => item.projectname === name
-                )) {
-                this.ide.confirm(
-                    localize(
-                        'Are you sure you want to replace'
-                    ) + '\n"' + name + '"?',
-                    'Replace Project',
-                    () => {
-                        this.ide.setProjectName(name);
-                        this.saveCloudProject();
-                    }
-                );
+        if (this.source === 'drive') {
+            const selected = this.listField.selected;
+            const overwrite = selected && selected.name === name ? selected : null;
+            const save = () => {
+                this.ide.saveGoogleDriveProject(name, overwrite || false);
+                this.destroy();
+            };
+            if (overwrite) {
+                this.ide.confirm('Sostituire “' + name + '” su Google Drive?',
+                    'Sostituisci progetto', save);
             } else {
-                this.ide.setProjectName(name);
-                this.saveCloudProject();
+                save();
             }
         } else if (this.source === 'disk') {
             this.ide.exportProject(name);
@@ -11172,218 +10350,18 @@ ProjectDialogMorph.prototype.saveProject = function () {
     }
 };
 
-ProjectDialogMorph.prototype.saveCloudProject = function () {
-    this.ide.source = 'cloud';
-    this.ide.saveProjectToCloud();
-    this.destroy();
-};
-
 ProjectDialogMorph.prototype.deleteProject = function () {
-    var proj,
-        idx,
-        name;
-
-    if (this.source === 'cloud') {
-        proj = this.listField.selected;
-        if (proj) {
-            this.ide.confirm(
-                localize(
-                    'Are you sure you want to delete'
-                ) + '\n"' + proj.projectname + '"?',
-                'Delete Project',
-                () => this.ide.cloud.deleteProject(
-                    proj.projectname,
-                    null, // username is implicit
-                    () => {
-                        this.ide.hasChangedMedia = true;
-                        idx = this.projectList.indexOf(proj);
-                        this.projectList.splice(idx, 1);
-                        this.installCloudProjectList( // refresh list
-                            this.projectList
-                        );
-                    },
-                    this.ide.cloudError()
-                )
-            );
+    if (this.source !== 'local') { return; }
+    const project = this.listField.selected;
+    if (!project) { return; }
+    this.ide.confirm(
+        localize('Are you sure you want to delete') + '\n"' + project.name + '"?',
+        'Delete Project',
+        () => {
+            delete localStorage['-snap-project-' + project.name];
+            this.setSource('local');
         }
-    } else { // 'local, examples'
-        if (this.listField.selected) {
-            name = this.listField.selected.name;
-            this.ide.confirm(
-                localize(
-                    'Are you sure you want to delete'
-                ) + '\n"' + name + '"?',
-                'Delete Project',
-                () => {
-                    delete localStorage['-snap-project-' + name];
-                    this.setSource(this.source); // refresh list
-                }
-            );
-        }
-    }
-};
-
-ProjectDialogMorph.prototype.shareProject = function () {
-    var ide = this.ide,
-        proj = this.listField.selected,
-        entry = this.listField.active;
-
-    if (proj) {
-        this.ide.confirm(
-            localize(
-                'Are you sure you want to share'
-            ) + '\n"' + proj.projectname + '"?',
-            'Share Project',
-            () => {
-                ide.showMessage('sharing\nproject...');
-                ide.cloud.shareProject(
-                    proj.projectname,
-                    null, // username is implicit
-                    () => {
-                        proj.ispublic = true;
-                        this.unshareButton.show();
-                        this.shareButton.hide();
-                        this.publishButton.show();
-                        this.unpublishButton.hide();
-                        entry.label.isBold = true;
-                        entry.label.rerender();
-                        this.buttons.fixLayout();
-                        this.rerender();
-                        this.ide.showMessage('shared.', 2);
-
-                        // Set the Shared URL if the project is currently open
-                        if (proj.projectname === ide.getProjectName()) {
-                            var usr = ide.cloud.username,
-                                projectId = 'Username=' +
-                                    encodeURIComponent(usr.toLowerCase()) +
-                                    '&ProjectName=' +
-                                    encodeURIComponent(proj.projectname);
-                            location.hash = 'present:' + projectId;
-                        }
-                    },
-                    this.ide.cloudError()
-                );
-            }
-        );
-    }
-};
-
-ProjectDialogMorph.prototype.unshareProject = function () {
-    var ide = this.ide,
-        proj = this.listField.selected,
-        entry = this.listField.active;
-
-    if (proj) {
-        this.ide.confirm(
-            localize(
-                'Are you sure you want to unshare'
-            ) + '\n"' + proj.projectname + '"?',
-            'Unshare Project',
-            () => {
-                ide.showMessage('unsharing\nproject...');
-                ide.cloud.unshareProject(
-                    proj.projectname,
-                    null, // username is implicit
-                    () => {
-                        proj.ispublic = false;
-                        this.shareButton.show();
-                        this.unshareButton.hide();
-                        this.publishButton.hide();
-                        this.unpublishButton.hide();
-                        entry.label.isBold = false;
-                        entry.label.isItalic = false;
-                        entry.label.rerender();
-                        this.buttons.fixLayout();
-                        this.rerender();
-                        this.ide.showMessage('unshared.', 2);
-                        if (proj.projectname === ide.getProjectName()) {
-                            location.hash = '';
-                        }
-                    },
-                    this.ide.cloudError()
-                );
-            }
-        );
-    }
-};
-
-ProjectDialogMorph.prototype.publishProject = function () {
-    var ide = this.ide,
-        proj = this.listField.selected,
-        entry = this.listField.active;
-
-    if (proj) {
-        this.ide.confirm(
-            localize(
-                'Are you sure you want to publish'
-            ) + '\n"' + proj.projectname + '"?',
-            'Publish Project',
-            () => {
-                ide.showMessage('publishing\nproject...');
-                ide.cloud.publishProject(
-                    proj.projectname,
-                    null, // username is implicit
-                    () => {
-                        proj.ispublished = true;
-                        this.unshareButton.show();
-                        this.shareButton.hide();
-                        this.publishButton.hide();
-                        this.unpublishButton.show();
-                        entry.label.isItalic = true;
-                        entry.label.rerender();
-                        this.buttons.fixLayout();
-                        this.rerender();
-                        this.ide.showMessage('published.', 2);
-
-                        // Set the Shared URL if the project is currently open
-                        if (proj.projectname === ide.getProjectName()) {
-                            var usr = ide.cloud.username,
-                                projectId = 'Username=' +
-                                    encodeURIComponent(usr.toLowerCase()) +
-                                    '&ProjectName=' +
-                                    encodeURIComponent(proj.projectname);
-                            location.hash = 'present:' + projectId;
-                        }
-                    },
-                    this.ide.cloudError()
-                );
-            }
-        );
-    }
-};
-
-ProjectDialogMorph.prototype.unpublishProject = function () {
-    var proj = this.listField.selected,
-        entry = this.listField.active;
-
-    if (proj) {
-        this.ide.confirm(
-            localize(
-                'Are you sure you want to unpublish'
-            ) + '\n"' + proj.projectname + '"?',
-            'Unpublish Project',
-            () => {
-                this.ide.showMessage('unpublishing\nproject...');
-                this.ide.cloud.unpublishProject(
-                    proj.projectname,
-                    null, // username is implicit
-                    () => {
-                        proj.ispublished = false;
-                        this.unshareButton.show();
-                        this.shareButton.hide();
-                        this.publishButton.show();
-                        this.unpublishButton.hide();
-                        entry.label.isItalic = false;
-                        entry.label.rerender();
-                        this.buttons.fixLayout();
-                        this.rerender();
-                        this.ide.showMessage('unpublished.', 2);
-                    },
-                    this.ide.cloudError()
-                );
-            }
-        );
-    }
+    );
 };
 
 ProjectDialogMorph.prototype.edit = function () {
@@ -11458,274 +10436,6 @@ ProjectDialogMorph.prototype.fixLayout = function () {
     }
 
     if (this.buttons && (this.buttons.children.length > 0)) {
-        this.buttons.setCenter(this.center());
-        this.buttons.setBottom(this.bottom() - this.padding);
-    }
-
-    // refresh shadow
-    this.removeShadow();
-    this.addShadow();
-};
-
-// ProjectRecoveryDialogMorph /////////////////////////////////////////
-// I show previous versions for a particular project and
-// let users recover them.
-
-ProjectRecoveryDialogMorph.prototype = new DialogBoxMorph();
-ProjectRecoveryDialogMorph.prototype.constructor = ProjectRecoveryDialogMorph;
-ProjectRecoveryDialogMorph.uber = DialogBoxMorph.prototype;
-
-// ProjectRecoveryDialogMorph instance creation:
-
-function ProjectRecoveryDialogMorph(ide, project, browser) {
-    this.init(ide, project, browser);
-}
-
-ProjectRecoveryDialogMorph.prototype.init = function (
-    ide,
-    projectName,
-    browser
-) {
-    // initialize inherited properties:
-    ProjectRecoveryDialogMorph.uber.init.call(
-        this,
-        this, // target
-        null, // function
-        null  // environment
-    );
-
-    this.ide = ide;
-    this.browser = browser;
-    this.key = 'recoverProject';
-    this.projectName = projectName;
-
-    this.versions = null;
-
-    this.handle = null;
-    this.listField = null;
-    this.preview = null;
-    this.notesText = null;
-    this.notesField = null;
-
-    this.labelString = 'Recover project';
-    this.createLabel();
-
-    this.buildContents();
-};
-
-ProjectRecoveryDialogMorph.prototype.buildContents = function () {
-    this.addBody(new Morph());
-    this.body.color = this.color;
-
-    this.buildListField();
-
-    this.preview = new Morph();
-    this.preview.fixLayout = nop;
-    this.preview.edge = InputFieldMorph.prototype.edge;
-    this.preview.fontSize = InputFieldMorph.prototype.fontSize;
-    this.preview.typeInPadding = InputFieldMorph.prototype.typeInPadding;
-    this.preview.contrast = InputFieldMorph.prototype.contrast;
-    this.preview.render = function (ctx) {
-        InputFieldMorph.prototype.render.call(this, ctx);
-        if (this.cachedTexture) {
-            this.renderCachedTexture(ctx);
-        } else if (this.texture) {
-            this.renderTexture(this.texture, ctx);
-        }
-    };
-    this.preview.renderCachedTexture = function (ctx) {
-        ctx.drawImage(this.cachedTexture, this.edge, this.edge);
-    };
-    this.preview.drawRectBorder = InputFieldMorph.prototype.drawRectBorder;
-    this.preview.setExtent(
-        this.ide.serializer.thumbnailSize.add(this.preview.edge * 2)
-    );
-
-    this.body.add(this.preview);
-
-    this.notesField = new ScrollFrameMorph();
-    this.notesField.fixLayout = nop;
-
-    this.notesField.edge = InputFieldMorph.prototype.edge;
-    this.notesField.fontSize = InputFieldMorph.prototype.fontSize;
-    this.notesField.typeInPadding = InputFieldMorph.prototype.typeInPadding;
-    this.notesField.contrast = InputFieldMorph.prototype.contrast;
-    this.notesField.render = InputFieldMorph.prototype.render;
-    this.notesField.drawRectBorder = InputFieldMorph.prototype.drawRectBorder;
-
-    this.notesField.acceptsDrops = false;
-    this.notesField.contents.acceptsDrops = false;
-
-    this.notesText = new TextMorph('');
-
-    this.notesField.isTextLineWrapping = true;
-    this.notesField.padding = 3;
-    this.notesField.setContents(this.notesText);
-    this.notesField.setWidth(this.preview.width());
-
-    this.body.add(this.notesField);
-
-    this.addButton('recoverProject', 'Recover', true);
-    this.addButton('cancel', 'Cancel');
-
-    this.setExtent(new Point(360, 300));
-    this.fixLayout();
-};
-
-ProjectRecoveryDialogMorph.prototype.buildListField = function () {
-    this.listField = new ListMorph([]);
-    this.fixListFieldItemColors();
-    this.listField.fixLayout = nop;
-    this.listField.edge = InputFieldMorph.prototype.edge;
-    this.listField.fontSize = InputFieldMorph.prototype.fontSize;
-    this.listField.typeInPadding = InputFieldMorph.prototype.typeInPadding;
-    this.listField.contrast = InputFieldMorph.prototype.contrast;
-    this.listField.render = InputFieldMorph.prototype.render;
-    this.listField.drawRectBorder = InputFieldMorph.prototype.drawRectBorder;
-
-    this.listField.action = (item) => {
-        var version;
-        if (item === undefined) { return; }
-        version = detect(
-            this.versions,
-            version => version.lastupdated === item
-        );
-        this.notesText.text = version.notes || '';
-        this.notesText.rerender();
-        this.notesField.contents.adjustBounds();
-        this.preview.texture = version.thumbnail;
-        this.preview.cachedTexture = null;
-        this.preview.rerender();
-    };
-
-    this.ide.cloud.getProjectVersionMetadata(
-        this.projectName,
-        versions => {
-            var today = new Date(),
-                yesterday = new Date();
-            yesterday.setDate(today.getDate() - 1);
-            this.versions = versions;
-            this.versions.forEach(version => {
-                var date = new Date(
-                    new Date().getTime() - version.lastupdated * 1000
-                );
-                if (date.toDateString() === today.toDateString()) {
-                    version.lastupdated = localize('Today, ') +
-                        date.toLocaleTimeString();
-                } else if (date.toDateString() === yesterday.toDateString()) {
-                    version.lastupdated = localize('Yesterday, ') +
-                        date.toLocaleTimeString();
-                } else {
-                    version.lastupdated = date.toLocaleString();
-                }
-            });
-            this.listField.elements = this.versions.map(version =>
-                version.lastupdated
-            );
-            this.clearDetails();
-            this.listField.buildListContents();
-            this.fixListFieldItemColors();
-            this.listField.adjustScrollBars();
-            this.listField.scrollY(this.listField.top());
-            this.fixLayout();
-        },
-        this.ide.cloudError()
-    );
-
-    this.body.add(this.listField);
-};
-
-ProjectRecoveryDialogMorph.prototype.cancel = function () {
-    this.browser.show();
-    this.browser.listField.select(
-        detect(
-            this.browser.projectList,
-            item => item.projectname === this.projectName
-        )
-    );
-    ProjectRecoveryDialogMorph.uber.cancel.call(this);
-};
-
-ProjectRecoveryDialogMorph.prototype.recoverProject = function () {
-    var lastupdated = this.listField.selected,
-        version = detect(
-            this.versions,
-            version => version.lastupdated === lastupdated
-        );
-
-    this.browser.openCloudProject(
-        {projectname: this.projectName},
-        version.delta
-    );
-    this.destroy();
-};
-
-ProjectRecoveryDialogMorph.prototype.popUp = function () {
-    var world = this.ide.world();
-    if (world) {
-        ProjectRecoveryDialogMorph.uber.popUp.call(this, world);
-        this.handle = new HandleMorph(
-            this,
-            300,
-            300,
-            this.corner,
-            this.corner
-        );
-    }
-};
-
-ProjectRecoveryDialogMorph.prototype.fixListFieldItemColors =
-    ProjectDialogMorph.prototype.fixListFieldItemColors;
-
-ProjectRecoveryDialogMorph.prototype.clearDetails =
-    ProjectDialogMorph.prototype.clearDetails;
-
-ProjectRecoveryDialogMorph.prototype.fixLayout = function () {
-    var titleHeight = fontHeight(this.titleFontSize) + this.titlePadding * 2,
-        thin = this.padding / 2;
-
-    if (this.body) {
-        this.body.setPosition(this.position().add(new Point(
-            this.padding,
-            titleHeight + this.padding
-        )));
-        this.body.setExtent(new Point(
-            this.width() - this.padding * 2,
-            this.height()
-                - this.padding * 3 // top, bottom and button padding.
-                - titleHeight
-                - this.buttons.height()
-        ));
-
-        this.listField.setWidth(
-            this.body.width()
-                - this.preview.width()
-                - this.padding
-        );
-        this.listField.contents.children[0].adjustWidths();
-
-        this.listField.setPosition(this.body.position());
-        this.listField.setHeight(this.body.height());
-
-        this.preview.setRight(this.body.right());
-        this.preview.setTop(this.listField.top());
-
-        this.notesField.setTop(this.preview.bottom() + thin);
-        this.notesField.setLeft(this.preview.left());
-        this.notesField.setHeight(
-            this.body.bottom() - this.preview.bottom() - thin
-        );
-    }
-
-    if (this.label) {
-        this.label.setCenter(this.center());
-        this.label.setTop(
-            this.top() + (titleHeight - this.label.height()) / 2
-        );
-    }
-
-    if (this.buttons) {
-        this.buttons.fixLayout();
         this.buttons.setCenter(this.center());
         this.buttons.setBottom(this.bottom() - this.padding);
     }

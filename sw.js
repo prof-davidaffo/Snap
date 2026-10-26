@@ -8,9 +8,12 @@ if (self.location.hostname === 'localhost' ||
     cacheBuster = Date.now();
 }
 var snapVersion = '12.3.6',
-    cacheName = `snap-pwa-${snapVersion}`,
+    cachePrefix = `snap-pwa:${self.registration.scope}:`,
+    cacheName = `${cachePrefix}${snapVersion}-google-drive-2`,
     filesToCache = [
+        'index.html',
         'snap.html',
+        'manifest.json',
 
         // program
         'src/morphic.js',
@@ -32,7 +35,10 @@ var snapVersion = '12.3.6',
         'src/xml.js',
         'src/store.js',
         'src/locale.js',
-        'src/cloud.js',
+        'config.js',
+        'src/storage.js',
+        'src/google-drive.js',
+        'src/google-drive-ui.js',
         'src/api.js',
         'src/embroider.js',
         'src/sha512.js',
@@ -880,26 +886,34 @@ self.addEventListener('install', function(e) {
 });
 
 self.addEventListener('activate', (evt) => {
-    self.skipWaiting();
     evt.waitUntil(
         caches.keys().then((keyList) => {
             return Promise.all(keyList.map((key) => {
-                if (key !== cacheName) {
+                if (key.startsWith(cachePrefix) && key !== cacheName) {
                     return caches.delete(key);
                 }
             }));
-        })
+        }).then(() => self.clients.claim())
     );
-    self.clients.claim();
 });
 
 /* Serve cached content when offline */
 self.addEventListener('fetch', function(event) {
+    const url = new URL(event.request.url),
+        scope = new URL(self.registration.scope);
+    // Handle only this app's static resources. Leave Google APIs and other
+    // GitHub Pages projects on the same origin to the browser.
+    if (event.request.method !== 'GET' || url.origin !== scope.origin ||
+            !url.pathname.startsWith(scope.pathname)) {
+        return;
+    }
     event.respondWith(
       fetch(event.request).catch(function(e) {
         return caches.open(cacheName).then(function(cache) {
-          return cache.match(event.request,
-                             {'ignoreSearch': true}).then(response => response);
+          const target = url.pathname === scope.pathname ?
+              new URL('index.html', scope).href : event.request;
+          return cache.match(target, {'ignoreSearch': true})
+            .then(response => response || Response.error());
         });
     }));
 });

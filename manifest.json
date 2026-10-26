@@ -44,6 +44,8 @@
       "type": "image/png"
     }],
   "lang": "en-US",
+  "id": "./",
+  "scope": "./",
   "start_url": "./snap.html",
   "display": "standalone",
   "background_color": "white",

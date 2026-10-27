@@ -9,7 +9,7 @@ if (self.location.hostname === 'localhost' ||
 }
 var snapVersion = '12.3.6',
     cachePrefix = `snap-pwa:${self.registration.scope}:`,
-    cacheName = `${cachePrefix}${snapVersion}-google-drive-privacy-1`,
+    cacheName = `${cachePrefix}${snapVersion}-google-drive-folder-1`,
     filesToCache = [
         'index.html',
         'snap.html',

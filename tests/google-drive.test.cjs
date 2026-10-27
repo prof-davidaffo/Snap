@@ -146,16 +146,18 @@ test('401 clears the session, 403 preserves it and surfaces the Drive error', as
 test('all project-list pages are fetched with the app-file filter', async () => {
     const f = fixture();
     f.authorized();
+    f.drive.getProjectFolder = async () => 'snap-folder';
     const urls = [];
     f.context.fetch = async url => {
         urls.push(new URL(url));
         return new Response(JSON.stringify(urls.length === 1 ? {
-            files: [{id: 'first', name: 'First.xml'}], nextPageToken: 'page-two'
-        } : {files: [{id: 'second', name: 'Second.xml'}]}));
+            files: [{id: 'first', name: 'First.xml', parents: ['snap-folder']}], nextPageToken: 'page-two'
+        } : {files: [{id: 'second', name: 'Second.xml', parents: ['snap-folder']}]}));
     };
     const files = await f.drive.listProjects();
     assert.deepEqual(Array.from(files, x => x.id), ['first', 'second']);
     assert.match(urls[0].searchParams.get('q'), /snapProject/);
+    assert.match(urls[0].searchParams.get('q'), /'snap-folder' in parents/);
     assert.equal(urls[1].searchParams.get('pageToken'), 'page-two');
 });
 
@@ -175,8 +177,12 @@ for (const id of [undefined, 'existing-file']) {
     test('resumable upload ' + (id ? 'updates the selected file' : 'creates a new XML file'), async () => {
         const f = fixture();
         f.authorized();
+        f.drive.getProjectFolder = async () => 'snap-folder';
         const requests = [];
         f.context.fetch = async (url, options) => {
+            if (!String(url).includes('/upload/')) {
+                return new Response(JSON.stringify({parents: ['snap-folder']}));
+            }
             requests.push({url, ...options});
             if (requests.length === 1) {
                 return new Response('', {headers: {
@@ -194,6 +200,7 @@ for (const id of [undefined, 'existing-file']) {
         assert.equal(metadata.name, 'Città.xml');
         assert.equal(metadata.appProperties.snapProject, '1');
         assert.equal(metadata.description, 'Notes');
+        assert.deepEqual(metadata.parents, id ? undefined : ['snap-folder']);
         assert.equal(requests[1].method, 'PUT');
         assert.equal(await requests[1].body.text(), xml);
     });
@@ -202,6 +209,7 @@ for (const id of [undefined, 'existing-file']) {
 test('an invalid upload location never receives the access token', async () => {
     const f = fixture();
     f.authorized();
+    f.drive.getProjectFolder = async () => 'snap-folder';
     let count = 0;
     f.context.fetch = async () => {
         count += 1;
@@ -229,4 +237,161 @@ test('disconnect invalidates an in-flight download', async () => {
     f.drive.disconnect();
     finish(new Response('<project/>'));
     await assert.rejects(pending, /account Google è cambiato/);
+});
+
+test('reuses an existing Snap folder in My Drive without creating another', async () => {
+    const f = fixture();
+    f.authorized();
+    f.context.fetch = async (url, options) => {
+        assert.equal(options.method, undefined);
+        const query = new URL(url).searchParams.get('q');
+        assert.match(query, /name = 'Snap'/);
+        assert.match(query, /'root' in parents/);
+        assert.match(query, /application\/vnd.google-apps.folder/);
+        assert.match(query, /trashed = false/);
+        return new Response(JSON.stringify({files: [{id: 'existing-folder'}]}));
+    };
+    assert.equal(await f.drive.getProjectFolder(), 'existing-folder');
+});
+
+test('concurrent operations create only one missing folder', async () => {
+    const f = fixture();
+    f.authorized();
+    let lookups = 0, creates = 0;
+    f.context.fetch = async (url, options) => {
+        if (options.method === 'POST') {
+            creates += 1;
+            const metadata = JSON.parse(options.body);
+            assert.equal(metadata.name, 'Snap');
+            assert.equal(metadata.mimeType, 'application/vnd.google-apps.folder');
+            assert.deepEqual(metadata.parents, ['root']);
+            return new Response(JSON.stringify({id: 'created-folder'}));
+        }
+        lookups += 1;
+        return new Response(JSON.stringify({files: []}));
+    };
+    const results = await Promise.all([f.drive.getProjectFolder(), f.drive.getProjectFolder()]);
+    assert.deepEqual(results, ['created-folder', 'created-folder']);
+    assert.equal(lookups, 1);
+    assert.equal(creates, 1);
+});
+
+test('folder creation errors propagate and the next operation can retry', async () => {
+    const f = fixture();
+    f.authorized();
+    let fail = true;
+    f.context.fetch = async (_, options) => {
+        if (options.method === 'POST') {
+            return fail ? new Response('', {status: 403}) :
+                new Response(JSON.stringify({id: 'retry-folder'}));
+        }
+        return new Response(JSON.stringify({files: []}));
+    };
+    await assert.rejects(f.drive.getProjectFolder(), /403/);
+    assert.equal(f.drive.folderRequest, null);
+    fail = false;
+    assert.equal(await f.drive.getProjectFolder(), 'retry-folder');
+});
+
+test('folder lookup is refreshed so a removed folder is recreated', async () => {
+    const f = fixture();
+    f.authorized();
+    let removed = false;
+    f.context.fetch = async (_, options) => new Response(JSON.stringify(
+        options.method === 'POST' ? {id: 'replacement-folder'} :
+            {files: removed ? [] : [{id: 'original-folder'}]}
+    ));
+    assert.equal(await f.drive.getProjectFolder(), 'original-folder');
+    removed = true;
+    assert.equal(await f.drive.getProjectFolder(), 'replacement-folder');
+});
+
+test('a failed folder lookup prevents saving in the Drive root', async () => {
+    const f = fixture();
+    f.authorized();
+    let requests = 0;
+    f.context.fetch = async () => {
+        requests += 1;
+        return new Response('', {status: 403});
+    };
+    await assert.rejects(f.drive.saveProject('Test', '<project/>', ''), /403/);
+    assert.equal(requests, 1);
+});
+
+test('legacy root projects move to Snap only after every list page is collected', async () => {
+    const f = fixture();
+    f.authorized();
+    f.drive.getProjectFolder = async () => 'snap-folder';
+    let pages = 0;
+    const moved = [];
+    f.context.fetch = async (url, options) => {
+        const parsed = new URL(url);
+        if (options.method === 'PATCH') {
+            assert.equal(pages, 2);
+            assert.equal(parsed.searchParams.get('addParents'), 'snap-folder');
+            assert.equal(parsed.searchParams.get('removeParents'), 'actual-root-id');
+            moved.push(parsed.pathname.split('/').at(-1));
+            return new Response(JSON.stringify({id: 'legacy-file'}));
+        }
+        pages += 1;
+        return new Response(JSON.stringify(pages === 1 ? {
+            files: [{id: 'legacy-file', parents: ['actual-root-id']}], nextPageToken: 'next'
+        } : {files: [{id: 'already-organized', parents: ['snap-folder']}]}));
+    };
+    const files = await f.drive.listProjects();
+    assert.deepEqual(Array.from(files, file => file.id), ['legacy-file', 'already-organized']);
+    assert.deepEqual(moved, ['legacy-file']);
+});
+
+test('updating a legacy project moves the same file into Snap', async () => {
+    const f = fixture();
+    f.authorized();
+    f.drive.getProjectFolder = async () => 'snap-folder';
+    f.context.fetch = async (url, options) => {
+        const parsed = new URL(url);
+        if (!parsed.pathname.startsWith('/upload/')) {
+            return new Response(JSON.stringify({parents: ['previous-folder']}));
+        }
+        if (options.method === 'PATCH') {
+            assert.equal(parsed.pathname, '/upload/drive/v3/files/legacy-file');
+            assert.equal(parsed.searchParams.get('addParents'), 'snap-folder');
+            assert.equal(parsed.searchParams.get('removeParents'), 'previous-folder');
+            assert.equal(JSON.parse(options.body).parents, undefined);
+            return new Response('', {headers: {
+                Location: 'https://www.googleapis.com/upload/drive/v3/files?upload_id=test'
+            }});
+        }
+        return new Response(JSON.stringify({id: 'legacy-file'}));
+    };
+    assert.equal((await f.drive.saveProject('Test', '<project/>', '', 'legacy-file')).id, 'legacy-file');
+});
+
+test('changing accounts during folder lookup never creates a folder on the new account', async () => {
+    const f = fixture();
+    f.authorized();
+    let finish, requests = 0;
+    f.context.fetch = () => {
+        requests += 1;
+        return new Promise(resolve => { finish = resolve; });
+    };
+    const pending = f.drive.getProjectFolder();
+    f.drive.clearSession();
+    f.authorized();
+    finish(new Response(JSON.stringify({files: []})));
+    await assert.rejects(pending, /account Google è cambiato/);
+    assert.equal(requests, 1);
+    assert.equal(f.drive.folderRequest, null);
+});
+
+test('a trashed project cannot be silently saved as an invisible file', async () => {
+    const f = fixture();
+    f.authorized();
+    f.drive.getProjectFolder = async () => 'snap-folder';
+    let count = 0;
+    f.context.fetch = async () => {
+        count += 1;
+        return new Response(JSON.stringify({parents: ['deleted-folder'], trashed: true}));
+    };
+    await assert.rejects(f.drive.saveProject('Test', '<project/>', '', 'trashed-file'), /cestino/);
+    assert.equal(count, 1);
 });

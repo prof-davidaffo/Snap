@@ -9,6 +9,7 @@ class GoogleDriveStorage {
         this.user = null;
         this.pending = false;
         this.session = 0;
+        this.folderRequest = null;
         this.onChange = () => {};
     }
 
@@ -20,6 +21,7 @@ class GoogleDriveStorage {
         this.token = null;
         this.user = null;
         this.expiresAt = 0;
+        this.folderRequest = null;
         this.session += 1;
         this.onChange();
     }
@@ -156,14 +158,66 @@ class GoogleDriveStorage {
         return response;
     }
 
+    checkSession(session) {
+        if (session !== this.session) {
+            throw new Error('L’account Google è cambiato. Riprova.');
+        }
+    }
+
+    async getProjectFolder() {
+        // Share concurrent lookups, but re-check Drive on the next operation
+        // so a deleted or renamed folder is not reused from a stale cache.
+        if (this.folderRequest) { return this.folderRequest; }
+        const session = this.session;
+        const pending = this.findOrCreateProjectFolder(session);
+        this.folderRequest = pending;
+        try {
+            return await pending;
+        } finally {
+            if (this.folderRequest === pending) { this.folderRequest = null; }
+        }
+    }
+
+    async findOrCreateProjectFolder(session) {
+        const params = new URLSearchParams({
+            q: "trashed = false and mimeType = 'application/vnd.google-apps.folder' " +
+                "and name = 'Snap' and 'root' in parents",
+            fields: 'files(id)', orderBy: 'createdTime', pageSize: '100', spaces: 'drive'
+        });
+        const response = await this.request(
+            'https://www.googleapis.com/drive/v3/files?' + params
+        );
+        const result = await response.json();
+        this.checkSession(session);
+        if (result.files?.[0]?.id) { return result.files[0].id; }
+        const created = await this.request(
+            'https://www.googleapis.com/drive/v3/files?fields=id', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: 'Snap', mimeType: 'application/vnd.google-apps.folder',
+                    parents: ['root']
+                })
+            }
+        );
+        const folder = await created.json();
+        this.checkSession(session);
+        if (!folder.id) {
+            throw new Error('Google Drive non ha confermato la creazione della cartella Snap.');
+        }
+        return folder.id;
+    }
+
     async listProjects() {
         const session = this.session;
+        const folder = await this.getProjectFolder();
+        this.checkSession(session);
         const files = [];
         let pageToken = '';
         do {
             const params = new URLSearchParams({
-                q: "trashed = false and appProperties has { key='snapProject' and value='1' }",
-                fields: 'nextPageToken,files(id,name,modifiedTime,description)',
+                q: "trashed = false and appProperties has { key='snapProject' and value='1' } " +
+                    `and ('${folder}' in parents or 'root' in parents)`,
+                fields: 'nextPageToken,files(id,name,modifiedTime,description,parents)',
                 orderBy: 'modifiedTime desc', pageSize: '100'
             });
             if (pageToken) { params.set('pageToken', pageToken); }
@@ -177,6 +231,21 @@ class GoogleDriveStorage {
             files.push(...(page.files || []));
             pageToken = page.nextPageToken;
         } while (pageToken);
+        // Older versions created projects in My Drive's root. Move only those
+        // app-tagged files, after collecting every page, keeping their IDs.
+        for (const file of files) {
+            this.checkSession(session);
+            if (!file.parents?.includes(folder)) {
+                const params = new URLSearchParams({addParents: folder, fields: 'id'});
+                if (file.parents?.length) { params.set('removeParents', file.parents.join(',')); }
+                await this.request(
+                    'https://www.googleapis.com/drive/v3/files/' +
+                    encodeURIComponent(file.id) + '?' + params,
+                    {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: '{}'}
+                );
+            }
+        }
+        this.checkSession(session);
         return files;
     }
 
@@ -191,10 +260,29 @@ class GoogleDriveStorage {
     async saveProject(name, xml, notes, id) {
         // Resumable upload supports projects with large embedded media too.
         const session = this.session;
+        const folder = await this.getProjectFolder();
+        this.checkSession(session);
+        const params = new URLSearchParams({
+            uploadType: 'resumable', fields: 'id,name,modifiedTime'
+        });
+        if (id) {
+            const metadata = await this.request(
+                'https://www.googleapis.com/drive/v3/files/' +
+                encodeURIComponent(id) + '?fields=parents,trashed'
+            );
+            const file = await metadata.json();
+            this.checkSession(session);
+            if (file.trashed) {
+                throw new Error('Il progetto è nel cestino di Drive. Ripristinalo oppure usa Salva con nome.');
+            }
+            if (!file.parents?.includes(folder)) {
+                params.set('addParents', folder);
+                if (file.parents?.length) { params.set('removeParents', file.parents.join(',')); }
+            }
+        }
         const suffix = id ? '/' + encodeURIComponent(id) : '';
         const response = await this.request(
-            'https://www.googleapis.com/upload/drive/v3/files' + suffix +
-            '?uploadType=resumable&fields=id,name,modifiedTime',
+            'https://www.googleapis.com/upload/drive/v3/files' + suffix + '?' + params,
             {
                 method: id ? 'PATCH' : 'POST',
                 headers: {
@@ -205,7 +293,8 @@ class GoogleDriveStorage {
                     name: name.replace(/\.xml$/i, '') + '.xml',
                     mimeType: 'application/xml',
                     description: notes || '',
-                    appProperties: {snapProject: '1'}
+                    appProperties: {snapProject: '1'},
+                    ...(!id ? {parents: [folder]} : {})
                 })
             }
         );

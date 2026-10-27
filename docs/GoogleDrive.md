@@ -56,12 +56,21 @@ un contesto sicuro. L'editor locale resta utilizzabile anche senza Google.
 - I dialoghi **Apri** e **Salva con nome** includono Google Drive; le azioni sono
   disponibili anche nel menu progetto. **Computer**, **Esempi** e recupero
   **Browser** mantengono il comportamento precedente.
-- I progetti vengono salvati nel Drive personale come file XML completi, con
+- I progetti vengono salvati nella cartella **Snap** del Drive personale come file XML completi, con
   immagini e suoni incorporati. Il caricamento usa il protocollo resumable
   di Google, ma non riprende automaticamente dopo una chiusura della pagina.
-- L'elenco mostra i progetti creati da questa integrazione, anche da altri
+- La cartella viene cercata nella radice del Drive e creata automaticamente se
+  non è disponibile. Viene riutilizzata la prima cartella Snap accessibile
+  all'app, in ordine di creazione. Il permesso `drive.file` non consente di
+  vedere cartelle create manualmente e mai autorizzate per l'app: in quel caso
+  può essere creata una seconda cartella Snap. Non servono nuovi permessi Google.
+- L'elenco mostra i progetti creati da questa integrazione nella cartella Snap, anche da altri
   dispositivi con lo stesso account e client OAuth. Per importare altri XML,
   usa l'importazione locale e poi salvali su Drive.
+- I vecchi progetti dell'app ancora nella radice del Drive vengono spostati
+  automaticamente in Snap all'apertura dell'elenco, senza copie e mantenendo
+  gli identificativi. I file in altre cartelle non vengono spostati dalla
+  ricerca; salvare nuovamente un progetto già aperto lo colloca in Snap.
 - **Salva** aggiorna il file Drive associato al progetto aperto. In **Salva con
   nome**, selezionare un file esistente e mantenerne il nome chiede conferma
   prima della sostituzione; un nome nuovo crea un nuovo file. Due file con lo
